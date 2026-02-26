@@ -135,9 +135,8 @@ class SaleApprovalRequest(models.Model):
     
     def _send_notification_to_managers(self):
         """Menejerlarni notifikatsiya qilish"""
-        managers = self.env['res.users'].search([
-            ('groups_id.name', 'ilike', 'Sales Manager')
-        ])
+        managers_group = self.env.ref('sales_team.group_sale_manager', raise_if_not_found=False)
+        managers = managers_group.user_ids if managers_group else self.env['res.users']
         
         for manager in managers:
             if manager.partner_id:
