@@ -21,18 +21,66 @@ class CustomerCreditLimit(models.Model):
     def _compute_total_due(self):
         for limit in self:
             if limit.partner_id:
-                limit.total_due = limit._get_partner_total_due(limit.partner_id.id)
+                limit.total_due = limit._get_partner_total_due(
+                    partner=limit.partner_id,
+                    company=self.env.company,
+                    target_currency=limit.currency_id,
+                )
             else:
                 limit.total_due = 0
 
-    def _get_partner_total_due(self, partner_id):
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            partner_id = vals.get('partner_id')
+            if partner_id:
+                partner = self.env['res.partner'].browse(partner_id)
+                vals['partner_id'] = partner.commercial_partner_id.id
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if vals.get('partner_id'):
+            partner = self.env['res.partner'].browse(vals['partner_id'])
+            vals['partner_id'] = partner.commercial_partner_id.id
+        return super().write(vals)
+
+    def _get_partner_total_due(self, partner, company, target_currency):
+        commercial_partner = partner.commercial_partner_id
         invoices = self.env['account.move'].search([
-            ('partner_id', '=', partner_id),
+            ('commercial_partner_id', '=', commercial_partner.id),
             ('state', '=', 'posted'),
-            ('payment_state', 'not in', ['paid', 'in_payment']),
-            ('move_type', '=', 'out_invoice'),
+            ('payment_state', 'in', ['not_paid', 'partial', 'in_payment']),
+            ('move_type', 'in', ['out_invoice', 'out_refund']),
         ])
-        return sum(invoices.mapped('amount_residual'))
+        total_due_company_currency = sum(invoices.mapped('amount_residual_signed'))
+        return company.currency_id._convert(
+            total_due_company_currency,
+            target_currency,
+            company,
+            fields.Date.context_today(self),
+        )
+
+    def _get_partner_open_sales_exposure(self, partner, company, target_currency, exclude_order=None):
+        commercial_partner = partner.commercial_partner_id
+        domain = [
+            ('partner_id', 'child_of', commercial_partner.id),
+            ('state', '=', 'sale'),
+        ]
+        if exclude_order:
+            domain.append(('id', '!=', exclude_order.id))
+
+        open_orders = self.env['sale.order'].search(domain)
+        exposure = 0.0
+        for so in open_orders:
+            if so.amount_to_invoice <= 0:
+                continue
+            exposure += so.currency_id._convert(
+                so.amount_to_invoice,
+                target_currency,
+                so.company_id,
+                so.date_order.date() if so.date_order else fields.Date.context_today(so),
+            )
+        return exposure
 
     @api.depends('credit_limit', 'total_due')
     def _compute_remaining_credit(self):
@@ -44,7 +92,7 @@ class CustomerCreditLimit(models.Model):
         for record in self:
             if record.active:
                 existing = self.search([
-                    ('partner_id', '=', record.partner_id.id),
+                    ('partner_id', '=', record.partner_id.commercial_partner_id.id),
                     ('active', '=', True),
                     ('id', '!=', record.id)
                 ])
@@ -70,42 +118,82 @@ class SaleOrder(models.Model):
     def _compute_available_credit(self):
         for order in self:
             credit_limit = self.env['customer.credit.limit'].search([
-                ('partner_id', '=', order.partner_id.id),
+                ('partner_id', '=', order.partner_id.commercial_partner_id.id),
                 ('active', '=', True)
             ], limit=1)
 
             if credit_limit:
-                live_total_due = credit_limit._get_partner_total_due(order.partner_id.id)
-                order.available_credit = credit_limit.credit_limit - live_total_due
+                live_total_due = credit_limit._get_partner_total_due(
+                    partner=order.partner_id,
+                    company=order.company_id,
+                    target_currency=credit_limit.currency_id,
+                )
+                open_sales_exposure = credit_limit._get_partner_open_sales_exposure(
+                    partner=order.partner_id,
+                    company=order.company_id,
+                    target_currency=credit_limit.currency_id,
+                    exclude_order=order,
+                )
+                order.available_credit = credit_limit.credit_limit - (live_total_due + open_sales_exposure)
             else:
                 order.available_credit = 0
 
     @api.depends('available_credit', 'amount_total')
     def _compute_credit_limit_warning(self):
         for order in self:
+            credit_limit = self.env['customer.credit.limit'].search([
+                ('partner_id', '=', order.partner_id.commercial_partner_id.id),
+                ('active', '=', True),
+            ], limit=1)
+            if not credit_limit:
+                order.credit_limit_warning = False
+                continue
+
+            order_total_in_limit_currency = order.currency_id._convert(
+                order.amount_total,
+                credit_limit.currency_id,
+                order.company_id,
+                order.date_order.date() if order.date_order else fields.Date.context_today(order),
+            )
             order.credit_limit_warning = (
-                order.available_credit > 0 and
-                order.amount_total > order.available_credit
+                order_total_in_limit_currency > order.available_credit
             )
 
     def _check_credit_limit_restriction(self):
         for order in self:
             credit_limit_rec = self.env['customer.credit.limit'].search([
-                ('partner_id', '=', order.partner_id.id),
+                ('partner_id', '=', order.partner_id.commercial_partner_id.id),
                 ('active', '=', True)
             ], limit=1)
 
             if not credit_limit_rec:
                 continue
 
-            live_total_due = credit_limit_rec._get_partner_total_due(order.partner_id.id)
-            total_risk = live_total_due + order.amount_total
+            live_total_due = credit_limit_rec._get_partner_total_due(
+                partner=order.partner_id,
+                company=order.company_id,
+                target_currency=credit_limit_rec.currency_id,
+            )
+            open_sales_exposure = credit_limit_rec._get_partner_open_sales_exposure(
+                partner=order.partner_id,
+                company=order.company_id,
+                target_currency=credit_limit_rec.currency_id,
+                exclude_order=order,
+            )
+            order_total_in_limit_currency = order.currency_id._convert(
+                order.amount_total,
+                credit_limit_rec.currency_id,
+                order.company_id,
+                order.date_order.date() if order.date_order else fields.Date.context_today(order),
+            )
+            total_risk = live_total_due + open_sales_exposure + order_total_in_limit_currency
             if total_risk > credit_limit_rec.credit_limit:
                 raise ValidationError(
                     "Kredit limiti oshdi. Amaliyot ruxsat etilmaydi.\n"
                     "Mijoz: %s\n"
                     "Limit: %s %s\n"
                     "Joriy qarz: %s %s\n"
+                    "Ochiq savdo riski: %s %s\n"
                     "Buyurtma summasi: %s %s\n"
                     "Jami risk: %s %s" % (
                         order.partner_id.name,
@@ -113,8 +201,10 @@ class SaleOrder(models.Model):
                         credit_limit_rec.currency_id.symbol,
                         live_total_due,
                         credit_limit_rec.currency_id.symbol,
-                        order.amount_total,
-                        order.currency_id.symbol,
+                        open_sales_exposure,
+                        credit_limit_rec.currency_id.symbol,
+                        order_total_in_limit_currency,
+                        credit_limit_rec.currency_id.symbol,
                         total_risk,
                         credit_limit_rec.currency_id.symbol,
                     )
@@ -122,11 +212,15 @@ class SaleOrder(models.Model):
 
     def action_view_credit_limit(self):
         self.ensure_one()
-        if not self.env.user.has_group('account.group_account_manager'):
-            raise AccessError("Kredit limit tafsilotini faqat Accounting Manager ko'ra oladi.")
+        if not (
+            self.env.user.has_group('account.group_account_manager')
+            or self.env.user.has_group('sales_team.group_sale_salesman')
+            or self.env.user.has_group('sales_team.group_sale_manager')
+        ):
+            raise AccessError("Kredit limitni faqat Sales yoki Accounting rollari ko'ra oladi.")
 
         credit_limit = self.env['customer.credit.limit'].search([
-            ('partner_id', '=', self.partner_id.id),
+            ('partner_id', '=', self.partner_id.commercial_partner_id.id),
             ('active', '=', True)
         ], limit=1)
 
@@ -180,19 +274,23 @@ class ResPartner(models.Model):
     def _compute_credit_limit_count(self):
         for partner in self:
             partner.credit_limit_count = self.env['customer.credit.limit'].search_count([
-                ('partner_id', '=', partner.id)
+                ('partner_id', '=', partner.commercial_partner_id.id)
             ])
 
     def action_view_credit_limits(self):
         self.ensure_one()
-        if not self.env.user.has_group('account.group_account_manager'):
-            raise AccessError("Kredit limit ro'yxatini faqat Accounting Manager ko'ra oladi.")
+        if not (
+            self.env.user.has_group('account.group_account_manager')
+            or self.env.user.has_group('sales_team.group_sale_salesman')
+            or self.env.user.has_group('sales_team.group_sale_manager')
+        ):
+            raise AccessError("Kredit limit ro'yxatini faqat Sales yoki Accounting rollari ko'ra oladi.")
         return {
             'type': 'ir.actions.act_window',
             'name': 'Kredit Limitlari',
             'res_model': 'customer.credit.limit',
             'view_mode': 'list,form',
-            'domain': [('partner_id', '=', self.id)],
-            'context': {'default_partner_id': self.id},
+            'domain': [('partner_id', '=', self.commercial_partner_id.id)],
+            'context': {'default_partner_id': self.commercial_partner_id.id},
             'target': 'current',
         }
