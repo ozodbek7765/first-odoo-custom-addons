@@ -34,17 +34,20 @@
                                 string="Tasdiqlash"
                                 type="object"
                                 class="btn-success"
+                                groups="sales_team.group_sale_manager"
                                 invisible="state != 'submitted'"/>
 
                         <button name="action_reject"
                                 string="Rad Etish"
                                 type="object"
                                 class="btn-danger"
+                                groups="sales_team.group_sale_manager"
                                 invisible="state != 'submitted'"/>
 
                         <button name="action_draft"
                                 string="Taslagi Holatiga"
                                 type="object"
+                                groups="sales_team.group_sale_manager"
                                 invisible="state not in ['rejected','submitted']"/>
 
                         <field name="state"
@@ -145,7 +148,7 @@
                             string="Tasdiqlash Ko'rish"
                             type="object"
                             class="oe_highlight"
-                            invisible="not approval_request_id"/>
+                            invisible="approval_count == 0"/>
                 </xpath>
 
                 <xpath expr="//div[@name='button_box']" position="inside">
@@ -154,20 +157,10 @@
                             type="object"
                             class="oe_stat_button"
                             icon="fa-check-circle"
-                            invisible="not approval_request_id">
-                        <field name="approval_status"
+                            invisible="approval_count == 0">
+                        <field name="approval_count"
                                widget="statinfo"
-                               string="Tasdiqlash"/>
-                    </button>
-
-                    <button name="action_view_approval_request"
-                            type="object"
-                            class="oe_stat_button"
-                            icon="fa-exclamation-triangle"
-                            invisible="not requires_approval or approval_request_id">
-                        <field string="Tasdiqlash Kerak"
-                               name="requires_approval"
-                               widget="statinfo"/>
+                               string="Approval"/>
                     </button>
 
                 </xpath>

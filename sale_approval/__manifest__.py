@@ -5,6 +5,7 @@
     'summary': 'Buyuk buyurtmalar uchun tasdiqlash tizimi',
     'depends': ['base', 'sale', 'mail'],
     'data': [
+        'data/sale_approval_sequence.xml',
         'security/ir.model.access.csv',
         'security/record_rules.xml',
         'views/approval_request_views.xml',

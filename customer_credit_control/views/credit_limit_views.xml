@@ -28,7 +28,7 @@
                     <sheet>
                         <div class="oe_button_box" name="button_box"/>
                         <group>
-                            <field name="partner_id" readonly="1"/>
+                            <field name="partner_id" readonly="id != False"/>
                             <field name="active"/>
                         </group>
                         <group>
@@ -80,17 +80,42 @@
                 <xpath expr="//field[@name='partner_id']" position="after">
                     <field name="available_credit" readonly="1" widget="monetary" nolabel="1"/>
                     <field name="credit_limit_warning" invisible="1"/>
+                    <div class="alert alert-danger"
+                         role="alert"
+                         invisible="not credit_limit_warning">
+                        Kredit limiti oshishi mumkin: buyurtma summasi qolgan kreditdan yuqori.
+                    </div>
                 </xpath>
                     <xpath expr="//div[@name='button_box']" position="inside">
                        <button name="action_view_credit_limit"
                                type="object"
                                class="oe_stat_button"
                                icon="fa-credit-card"
+                               groups="account.group_account_manager"
                                invisible="available_credit == 0">
                           <field name="available_credit"
                                  widget="statinfo"
                                 string="Mavjud Kredit"/>
                      </button>
+                </xpath>
+            </field>
+        </record>
+
+        <record id="view_res_partner_form_credit_limit" model="ir.ui.view">
+            <field name="name">res.partner.form.credit.limit</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//div[@name='button_box']" position="inside">
+                    <button name="action_view_credit_limits"
+                            type="object"
+                            class="oe_stat_button"
+                            icon="fa-credit-card"
+                            groups="account.group_account_manager">
+                        <field name="credit_limit_count"
+                               widget="statinfo"
+                               string="Credit Limits"/>
+                    </button>
                 </xpath>
             </field>
         </record>

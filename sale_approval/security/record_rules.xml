@@ -7,7 +7,7 @@
             <field name="model_id" ref="model_sale_approval_request"/>
             <field name="groups" eval="[(4, ref('base.group_user'))]"/>
             <field name="perm_read" eval="1"/>
-            <field name="perm_write" eval="0"/>
+            <field name="perm_write" eval="1"/>
             <field name="perm_create" eval="0"/>
             <field name="perm_unlink" eval="0"/>
             <field name="domain_force">[('requested_by', '=', user.id)]</field>

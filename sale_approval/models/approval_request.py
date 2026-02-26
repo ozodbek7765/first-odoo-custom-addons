@@ -1,6 +1,5 @@
-from odoo import models, fields, api
-from odoo.exceptions import ValidationError
-from datetime import datetime
+from odoo import models, fields, api, _
+from odoo.exceptions import ValidationError, AccessError
 
 
 class SaleApprovalRequest(models.Model):
@@ -29,7 +28,39 @@ class SaleApprovalRequest(models.Model):
                                    default=lambda self: self.env.company.currency_id)
     approval_date = fields.Datetime(string='Tasdiqlash Vaqti', readonly=True)
 
-    @api.depends('sale_order_id')
+    _sql_constraints = [
+        ('sale_order_unique', 'unique(sale_order_id)', "Har bir sale order uchun faqat bitta approval request bo'lishi mumkin."),
+    ]
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        is_manager = self.env.user.has_group('sales_team.group_sale_manager')
+        for vals in vals_list:
+            if not vals.get('name'):
+                vals['name'] = self.env['ir.sequence'].next_by_code('sale.approval.request') or '/'
+            if not is_manager:
+                # Oddiy user faqat o'zi uchun submit jarayonini boshlaydi.
+                vals['requested_by'] = self.env.user.id
+                vals.pop('approved_by', None)
+                vals.pop('approval_date', None)
+                if vals.get('state') in ('approved', 'rejected'):
+                    raise AccessError(_("Oddiy user approval holatini belgilay olmaydi."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if not self.env.user.has_group('sales_team.group_sale_manager'):
+            allowed_fields = {'state'}
+            if set(vals) - allowed_fields:
+                raise AccessError(_("Oddiy user faqat submit (state) amalini bajarishi mumkin."))
+
+            if 'state' in vals:
+                if vals['state'] != 'submitted':
+                    raise AccessError(_("Oddiy user faqat `submitted` holatiga o'tkaza oladi."))
+                if any(rec.state != 'draft' for rec in self):
+                    raise ValidationError(_("Faqat draft so'rovni submit qilish mumkin."))
+        return super().write(vals)
+
+    @api.depends('sale_order_id.amount_total')
     def _compute_total_amount(self):
         for request in self:
             if request.sale_order_id:
@@ -50,6 +81,9 @@ class SaleApprovalRequest(models.Model):
     
     def action_approve(self):
         """Tasdiqlash"""
+        if not self.env.user.has_group('sales_team.group_sale_manager'):
+            raise ValidationError(_("Faqat Sales Manager tasdiqlashi mumkin!"))
+
         for request in self:
             if request.state != 'submitted':
                 raise ValidationError('Faqat yuborilgan so\'rovlarni tasdiqlash mumkin!')
@@ -57,7 +91,7 @@ class SaleApprovalRequest(models.Model):
             request.write({
                 'state': 'approved',
                 'approved_by': self.env.user.id,
-                'approval_date': datetime.now()
+                'approval_date': fields.Datetime.now()
             })
             
             # Sale Order avtomatik confirm qilish
@@ -68,10 +102,13 @@ class SaleApprovalRequest(models.Model):
     
     def action_reject(self):
         """Rad etish"""
-        if not self.rejection_reason:
-            raise ValidationError('Rad etish sababini kiriting!')
-        
+        if not self.env.user.has_group('sales_team.group_sale_manager'):
+            raise ValidationError(_("Faqat Sales Manager rad etishi mumkin!"))
+
         for request in self:
+            if not request.rejection_reason:
+                raise ValidationError('Rad etish sababini kiriting!')
+
             if request.state != 'submitted':
                 raise ValidationError('Faqat yuborilgan so\'rovlarni rad etish mumkin!')
             
@@ -82,6 +119,9 @@ class SaleApprovalRequest(models.Model):
     
     def action_draft(self):
         """Taslagi holatiga qaytarish"""
+        if not self.env.user.has_group('sales_team.group_sale_manager'):
+            raise ValidationError(_("Faqat Sales Manager holatni qaytarishi mumkin!"))
+
         for request in self:
             if request.state not in ['rejected', 'submitted']:
                 raise ValidationError('Faqat rad etilgan yoki yuborilgan so\'rovlarni taslagi holatiga qaytarish mumkin!')
@@ -146,11 +186,9 @@ class SaleOrder(models.Model):
     @api.depends('approval_request_id')
     def _compute_approval_count(self):
         for order in self:
-            order.approval_count = len(
-                self.env['sale.approval.request'].search([
-                    ('sale_order_id', '=', order.id)
-                ])
-            )
+            order.approval_count = self.env['sale.approval.request'].search_count([
+                ('sale_order_id', '=', order.id)
+            ])
 
     def action_confirm(self):
         """Buyurtmani tasdiqlash"""
@@ -167,6 +205,7 @@ class SaleOrder(models.Model):
                         'sale_order_id': order.id,
                         'requested_by': self.env.user.id,
                     })
+                    order.approval_request_id = approval.id
                     
                     raise ValidationError(
                         f"⚠️ Bu buyurtma tasdiqlash talab qiladi!\n\n"
@@ -176,14 +215,16 @@ class SaleOrder(models.Model):
                         f"Iltimos, Sales Manager tasdiqlasinini kuting."
                     )
                 
-                elif approval.state == 'submitted':
+                elif approval.state in ('draft', 'submitted'):
+                    order.approval_request_id = approval.id
                     raise ValidationError(
                         f"⏳ Bu buyurtma hali tasdiqlash kutmoqda!\n"
                         f"Tasdiqlash so'rovi: {approval.name}\n"
-                        f"Iltimos, Sales Manager tasdiqlasinini kuting."
+                        f"Iltimos, so'rovni yuboring va Sales Manager tasdiqlasinini kuting."
                     )
                 
                 elif approval.state == 'rejected':
+                    order.approval_request_id = approval.id
                     raise ValidationError(
                         f"❌ Bu buyurtma rad etildi!\n"
                         f"Sabab: {approval.rejection_reason}\n"
@@ -199,8 +240,8 @@ class SaleOrder(models.Model):
     def action_view_approval_request(self):
         """Tasdiqlash so'rovini ko'rish"""
         self.ensure_one()
-        
-        approval = self.env['sale.approval.request'].search([
+
+        approval = self.approval_request_id or self.env['sale.approval.request'].search([
             ('sale_order_id', '=', self.id)
         ], limit=1)
         
@@ -222,10 +263,19 @@ class SaleOrder(models.Model):
         if self.amount_total <= 10000:
             raise ValidationError('Faqat 10000 dan katta buyurtmalar uchun tasdiqlash kerak!')
         
-        approval = self.env['sale.approval.request'].create({
-            'sale_order_id': self.id,
-            'requested_by': self.env.user.id,
-        })
+        if self.approval_request_id:
+            approval = self.approval_request_id
+        else:
+            approval = self.env['sale.approval.request'].search([
+                ('sale_order_id', '=', self.id)
+            ], limit=1)
+
+            if not approval:
+                approval = self.env['sale.approval.request'].create({
+                    'sale_order_id': self.id,
+                    'requested_by': self.env.user.id,
+                })
+            self.approval_request_id = approval.id
         
         return {
             'type': 'ir.actions.act_window',
