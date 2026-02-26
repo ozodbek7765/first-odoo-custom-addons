@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Kredit Limiti List View -->
+        <record id="view_customer_credit_limit_list" model="ir.ui.view">
+            <field name="name">customer.credit.limit.list</field>
+            <field name="model">customer.credit.limit</field>
+            <field name="arch" type="xml">
+                <list>
+                    <field name="partner_id"/>
+                    <field name="credit_limit"/>
+                    <field name="total_due"/>
+                    <field name="remaining_credit"/>
+                    <field name="active"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- Kredit Limiti Form View -->
+        <record id="view_customer_credit_limit_form" model="ir.ui.view">
+            <field name="name">customer.credit.limit.form</field>
+            <field name="model">customer.credit.limit</field>
+            <field name="arch" type="xml">
+                <form>
+                    <header>
+                        <button name="toggle_active" string="Aktiv/Pasif" type="object" class="oe_highlight" groups="account.group_account_manager"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_button_box" name="button_box"/>
+                        <group>
+                            <field name="partner_id" readonly="1"/>
+                            <field name="active"/>
+                        </group>
+                        <group>
+                            <field name="credit_limit"/>
+                            <field name="currency_id"/>
+                        </group>
+                        <group>
+                            <field name="total_due" readonly="1"/>
+                            <field name="remaining_credit" readonly="1" widget="monetary"/>
+                        </group>
+                        <group>
+                            <field name="note" placeholder="Izohlar..."/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <!-- Kredit Limiti Action -->
+        <record id="action_customer_credit_limit" model="ir.actions.act_window">
+            <field name="name">Kredit Limitlari</field>
+            <field name="res_model">customer.credit.limit</field>
+            <field name="view_mode">list,form</field>
+            <field name="help" type="html">
+                <p class="oe_view_nocontent_create">
+                    Yangi kredit limiti yarating
+                </p>
+            </field>
+        </record>
+
+        <!-- Root Menu -->
+        <menuitem id="menu_customer_credit_root"
+                name="Credit Control"
+                sequence="10"/>
+
+        <!-- Child Menu -->
+        <menuitem id="menu_customer_credit_limit"
+                name="Kredit Limitlari"
+                parent="menu_customer_credit_root"
+                action="action_customer_credit_limit"
+                sequence="1"/>
+
+        <!-- Sale Order Inheritance -->
+        <record id="view_sale_order_form_credit_limit" model="ir.ui.view">
+            <field name="name">sale.order.form.credit.limit</field>
+            <field name="model">sale.order</field>
+            <field name="inherit_id" ref="sale.view_order_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='partner_id']" position="after">
+                    <field name="available_credit" readonly="1" widget="monetary" nolabel="1"/>
+                    <field name="credit_limit_warning" invisible="1"/>
+                </xpath>
+                    <xpath expr="//div[@name='button_box']" position="inside">
+                       <button name="action_view_credit_limit"
+                               type="object"
+                               class="oe_stat_button"
+                               icon="fa-credit-card"
+                               invisible="available_credit == 0">
+                          <field name="available_credit"
+                                 widget="statinfo"
+                                string="Mavjud Kredit"/>
+                     </button>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_customer_credit_limit_user,Kredit Limiti - Foydalanuvchi,model_customer_credit_limit,base.group_user,1,0,0,0
+access_customer_credit_limit_manager,Kredit Limiti - Boshqaruvchi,model_customer_credit_limit,account.group_account_manager,1,1,1,1
+access_sale_order_user,Sotish Buyurtmasi - Foydalanuvchi,model_sale_order,base.group_user,1,1,1,0

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Tasdiqlash So'rovini ko'rish uchun record rule -->
+        <record id="rule_sale_approval_request_own" model="ir.rule">
+            <field name="name">Taskdiqash So'rovi - O'z So'rovlarini Ko'rish</field>
+            <field name="model_id" ref="model_sale_approval_request"/>
+            <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+            <field name="perm_read" eval="1"/>
+            <field name="perm_write" eval="0"/>
+            <field name="perm_create" eval="0"/>
+            <field name="perm_unlink" eval="0"/>
+            <field name="domain_force">[('requested_by', '=', user.id)]</field>
+        </record>
+
+        <!-- Sales Manager barcha so'rovlarni ko'rishi mumkin -->
+        <record id="rule_sale_approval_request_manager" model="ir.rule">
+            <field name="name">Tasdiqlash So'rovi - Menejerlar Barcha So'rovlarni Ko'rishi</field>
+            <field name="model_id" ref="model_sale_approval_request"/>
+            <field name="groups" eval="[(4, ref('sales_team.group_sale_manager'))]"/>
+            <field name="perm_read" eval="1"/>
+            <field name="perm_write" eval="1"/>
+            <field name="perm_create" eval="1"/>
+            <field name="perm_unlink" eval="1"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+        </record>
+    </data>
+</odoo>
