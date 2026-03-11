@@ -28,9 +28,10 @@ class SaleApprovalRequest(models.Model):
                                    default=lambda self: self.env.company.currency_id)
     approval_date = fields.Datetime(string='Tasdiqlash Vaqti', readonly=True)
 
-    _sql_constraints = [
-        ('sale_order_unique', 'unique(sale_order_id)', "Har bir sale order uchun faqat bitta approval request bo'lishi mumkin."),
-    ]
+    _sale_order_unique = models.Constraint(
+        'UNIQUE(sale_order_id)',
+        "Har bir sale order uchun faqat bitta approval request bo'lishi mumkin.",
+    )
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -39,7 +40,6 @@ class SaleApprovalRequest(models.Model):
             if not vals.get('name'):
                 vals['name'] = self.env['ir.sequence'].next_by_code('sale.approval.request') or '/'
             if not is_manager:
-                # Oddiy user faqat o'zi uchun submit jarayonini boshlaydi.
                 vals['requested_by'] = self.env.user.id
                 vals.pop('approved_by', None)
                 vals.pop('approval_date', None)
@@ -76,7 +76,6 @@ class SaleApprovalRequest(models.Model):
             
             request.write({'state': 'submitted'})
             
-            # Notifikatsiya yuborish
             request._send_notification_to_managers()
     
     def action_approve(self):
@@ -94,10 +93,8 @@ class SaleApprovalRequest(models.Model):
                 'approval_date': fields.Datetime.now()
             })
             
-            # Sale Order avtomatik confirm qilish
             request.sale_order_id.action_confirm()
             
-            # Notifikatsiya yuborish
             request._send_approval_notification()
     
     def action_reject(self):
@@ -114,7 +111,6 @@ class SaleApprovalRequest(models.Model):
             
             request.write({'state': 'rejected'})
             
-            # Notifikatsiya yuborish
             request._send_rejection_notification()
     
     def action_draft(self):
@@ -193,13 +189,11 @@ class SaleOrder(models.Model):
         """Buyurtmani tasdiqlash"""
         for order in self:
             if order.amount_total > 10000:
-                # Agar tasdiqlash so'rovi mavjud bo'lsa, uni tekshir
                 approval = self.env['sale.approval.request'].search([
                     ('sale_order_id', '=', order.id)
                 ], limit=1)
                 
                 if not approval:
-                    # Yangi tasdiqlash so'rovi yarating
                     approval = self.env['sale.approval.request'].create({
                         'sale_order_id': order.id,
                         'requested_by': self.env.user.id,
@@ -231,7 +225,6 @@ class SaleOrder(models.Model):
                     )
                 
                 elif approval.state == 'approved':
-                    # Tasdiqlash so'rovi tasdiqlandi, davom et
                     order.approval_request_id = approval.id
         
         return super(SaleOrder, self).action_confirm()

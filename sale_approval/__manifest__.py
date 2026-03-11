@@ -3,6 +3,7 @@
     'version': '1.0',
     'category': 'Sales',
     'summary': 'Buyuk buyurtmalar uchun tasdiqlash tizimi',
+    'author': 'Your Company',
     'depends': ['base', 'sale', 'mail'],
     'data': [
         'data/sale_approval_sequence.xml',
@@ -12,4 +13,5 @@
     ],
     'installable': True,
     'application': True,
+    'license': 'LGPL-3',
 }
